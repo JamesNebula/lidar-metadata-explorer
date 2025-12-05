@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Data (do NOT commit real LAZ files — too big & sensitive)
+uploads/
+data/
+*.laz
+*.las
+
+# Env
+.env
