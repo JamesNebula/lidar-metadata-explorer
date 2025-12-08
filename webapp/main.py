@@ -3,6 +3,7 @@ import os
 from werkzeug.utils import secure_filename
 import laspy
 import numpy as np
+import pyproj
 
 main_bp = Blueprint('main', __name__)
 
@@ -31,18 +32,68 @@ def upload_file():
                 # ✅ Extract metadata — now stays in scope
                 try:
                     with laspy.open(file_path) as las:
-                        h = las.header
+                        header = las.header
+                        vlrs = header.vlrs
+                        evlrs = header.evlrs
                         metadata = {
                             'filename': filename,
-                            'version': str(h.version),
-                            'point_format': h.point_format.id,
-                            'point_count': f"{h.point_count:,}",
+                            'version': str(header.version),
+                            'point_format': header.point_format.id,
+                            'point_count': f"{header.point_count:,}",
                             'bounds': (
-                                f"X[{h.mins[0]:.2f}, {h.maxs[0]:.2f}], "
-                                f"Y[{h.mins[1]:.2f}, {h.maxs[1]:.2f}], "
-                                f"Z[{h.mins[2]:.2f}, {h.maxs[2]:.2f}]"
+                                f"X[{header.mins[0]:.2f}, {header.maxs[0]:.2f}], "
+                                f"Y[{header.mins[1]:.2f}, {header.maxs[1]:.2f}], "
+                                f"Z[{header.mins[2]:.2f}, {header.maxs[2]:.2f}]"
                             )
                         }
+
+                        crs_info = "Not specified"
+                        # Helper: safely get user_id/record_id (works for all VLR types)
+                        def get_vlr_id(vlr):
+                            # Newer laspy: VLRs are typed; use class name or header
+                            if hasattr(vlr, 'header'):
+                                return vlr.header.user_id, vlr.header.record_id
+                            # Fallback for older or raw VLRs
+                            return getattr(vlr, 'user_id', ''), getattr(vlr, 'record_id', -1)
+
+
+                        # Check standard VLRs
+                        for vlr in header.vlrs:
+                            user_id, record_id = get_vlr_id(vlr)
+                            # Standard WKT VLR: user_id="LASF_Projection", record_id=2112
+                            if user_id == "LASF_Projection" and record_id == 2112:
+                                wkt = None
+                                # Try common WKT attributes
+                                if hasattr(vlr, 'string'):
+                                    wkt = vlr.string
+                                elif hasattr(vlr, 'wkt_string'):
+                                    wkt = vlr.wkt_string
+                                elif hasattr(vlr, '__str__'):
+                                    wkt = str(vlr)
+
+                                if wkt and wkt.strip():
+                                    wkt = wkt.strip()
+                                    try:
+                                        crs = pyproj.CRS.from_wkt(wkt)
+                                        epsg = crs.to_epsg()
+                                        name = crs.name
+                                        crs_info = f"EPSG:{epsg} — {name}" if epsg else f"WKT: {name}"
+                                    except Exception:
+                                        crs_info = f"WKT (truncated): {wkt[:80]}…"
+                                    break
+
+                        # Check EVLRs (if any)
+                        if crs_info == "Not specified" and hasattr(header, 'evlrs'):
+                            for evlr in header.evlrs:
+                                user_id, record_id = get_vlr_id(evlr)
+                                if user_id == "LASF_Projection" and record_id == 2112:
+                                    wkt = getattr(evlr, 'string', '') or getattr(evlr, 'wkt_string', '')
+                                    if wkt and wkt.strip():
+                                        crs_info = f"WKT EVLR (truncated): {wkt[:80]}…"
+                                        break
+                                    
+                        metadata['crs'] = crs_info
+
                 except Exception as e:
                     messages.append(('error', f'Error reading LAS: {str(e)}'))
 
@@ -56,6 +107,7 @@ def upload_file():
     if metadata:
         items = [f"<li><strong>{k}:</strong> {v}</li>" for k, v in metadata.items()]
         metadata_html = f"<h2>Metadata</h2><ul>{''.join(items)}</ul>"
+
 
     return f"""
     <!doctype html>
