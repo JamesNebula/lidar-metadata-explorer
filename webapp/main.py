@@ -13,7 +13,7 @@ def allowed_file(filename):
 
 @main_bp.route('/', methods=['GET', 'POST'])
 def upload_file():
-    metadata = None  # ← define here, outside POST
+    metadata = None  
     messages = []
 
     if request.method == 'POST':
@@ -29,73 +29,71 @@ def upload_file():
                 file.save(file_path)
                 messages.append(('success', f'File {filename} uploaded successfully!'))
 
-                # ✅ Extract metadata — now stays in scope
                 try:
-                    with laspy.open(file_path) as las:
-                        header = las.header
-                        vlrs = header.vlrs
-                        evlrs = header.evlrs
+                    with laspy.open(file_path, laz_backend=laspy.LazBackend.Laszip) as las:
+                        h = las.header
+
+                        # 1. Basic metadata
                         metadata = {
                             'filename': filename,
-                            'version': str(header.version),
-                            'point_format': header.point_format.id,
-                            'point_count': f"{header.point_count:,}",
+                            'version': str(h.version),
+                            'point_format': h.point_format.id,
+                            'point_count': f"{h.point_count:,}",
                             'bounds': (
-                                f"X[{header.mins[0]:.2f}, {header.maxs[0]:.2f}], "
-                                f"Y[{header.mins[1]:.2f}, {header.maxs[1]:.2f}], "
-                                f"Z[{header.mins[2]:.2f}, {header.maxs[2]:.2f}]"
+                                f"X[{h.mins[0]:.2f}, {h.maxs[0]:.2f}], "
+                                f"Y[{h.mins[1]:.2f}, {h.maxs[1]:.2f}], "
+                                f"Z[{h.mins[2]:.2f}, {h.maxs[2]:.2f}]"
                             )
                         }
 
+                        # 2. CRS detection 
                         crs_info = "Not specified"
-                        # Helper: safely get user_id/record_id (works for all VLR types)
-                        def get_vlr_id(vlr):
-                            # Newer laspy: VLRs are typed; use class name or header
-                            if hasattr(vlr, 'header'):
-                                return vlr.header.user_id, vlr.header.record_id
-                            # Fallback for older or raw VLRs
-                            return getattr(vlr, 'user_id', ''), getattr(vlr, 'record_id', -1)
-
-
-                        # Check standard VLRs
-                        for vlr in header.vlrs:
-                            user_id, record_id = get_vlr_id(vlr)
-                            # Standard WKT VLR: user_id="LASF_Projection", record_id=2112
+                        for vlr in h.vlrs:
+                            user_id = getattr(vlr, 'user_id', getattr(getattr(vlr, 'header', None), 'user_id', ''))
+                            record_id = getattr(vlr, 'record_id', getattr(getattr(vlr, 'header', None), 'record_id', -1))
                             if user_id == "LASF_Projection" and record_id == 2112:
-                                wkt = None
-                                # Try common WKT attributes
-                                if hasattr(vlr, 'string'):
-                                    wkt = vlr.string
-                                elif hasattr(vlr, 'wkt_string'):
-                                    wkt = vlr.wkt_string
-                                elif hasattr(vlr, '__str__'):
-                                    wkt = str(vlr)
-
+                                wkt = getattr(vlr, 'string', getattr(vlr, 'wkt_string', ''))
                                 if wkt and wkt.strip():
-                                    wkt = wkt.strip()
                                     try:
-                                        crs = pyproj.CRS.from_wkt(wkt)
+                                        crs = pyproj.CRS.from_wkt(wkt.strip())
                                         epsg = crs.to_epsg()
                                         name = crs.name
                                         crs_info = f"EPSG:{epsg} — {name}" if epsg else f"WKT: {name}"
                                     except Exception:
                                         crs_info = f"WKT (truncated): {wkt[:80]}…"
                                     break
-
-                        # Check EVLRs (if any)
-                        if crs_info == "Not specified" and hasattr(header, 'evlrs'):
-                            for evlr in header.evlrs:
-                                user_id, record_id = get_vlr_id(evlr)
-                                if user_id == "LASF_Projection" and record_id == 2112:
-                                    wkt = getattr(evlr, 'string', '') or getattr(evlr, 'wkt_string', '')
-                                    if wkt and wkt.strip():
-                                        crs_info = f"WKT EVLR (truncated): {wkt[:80]}…"
-                                        break
-                                    
                         metadata['crs'] = crs_info
+
+                        # 3. Classification summary 
+                        if 'classification' in h.point_format.dimension_names:
+                            points = las.read()
+                            classification = points.classification
+
+                            unique, counts = np.unique(classification, return_counts=True)
+                            class_counts = dict(zip(unique, counts))
+
+                            class_names = {
+                                0: "Never Classified", 1: "Unclassified", 2: "Ground",
+                                3: "Low Vegetation", 4: "Medium Vegetation", 5: "High Vegetation",
+                                6: "Building", 7: "Low Point", 9: "Water", 
+                                17: "Bridge Deck", 18: "High Noise"
+                            }
+
+                            total = len(classification)
+                            class_summary = []
+                            for cls_id in sorted(class_counts):
+                                count = class_counts[cls_id]
+                                name = class_names.get(cls_id, f"Class {cls_id}")
+                                pct = count / total * 100
+                                class_summary.append(f"{cls_id} ({name}): {count:,} pts ({pct:.1f}%)")
+
+                            metadata['classification'] = "<br>".join(class_summary)
+                        else:
+                            metadata['classification'] = "No 'classification' field"
 
                 except Exception as e:
                     messages.append(('error', f'Error reading LAS: {str(e)}'))
+                    metadata = None
 
     # Build HTML
     flash_html = ''.join(
