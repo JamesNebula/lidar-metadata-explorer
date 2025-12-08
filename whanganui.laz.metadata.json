@@ -1,0 +1,41 @@
+{
+  "filename": "whanganui.laz",
+  "version": "1.4",
+  "point_format": 6,
+  "point_count": 14304,
+  "bounds": {
+    "x_min": 1835705.844,
+    "x_max": 1835768.996,
+    "y_min": 5526577.2809999995,
+    "y_max": 5526612.881,
+    "z_min": 260.54,
+    "z_max": 286.735
+  },
+  "crs": "NZGD2000 / New Zealand Transverse Mercator 2000 + NZVD2016 height",
+  "classification": [
+    {
+      "class_id": 1,
+      "name": "Unclassified",
+      "count": 2019,
+      "percentage": 14.1
+    },
+    {
+      "class_id": 2,
+      "name": "Ground",
+      "count": 11740,
+      "percentage": 82.1
+    },
+    {
+      "class_id": 3,
+      "name": "Low Veg",
+      "count": 544,
+      "percentage": 3.8
+    },
+    {
+      "class_id": 4,
+      "name": "Med Veg",
+      "count": 1,
+      "percentage": 0.0
+    }
+  ]
+}
