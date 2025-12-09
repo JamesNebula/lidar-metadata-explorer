@@ -18,3 +18,6 @@ cd lidar-metadata-explorer
 python -m venv venv && source venv/bin/activate  # Linux/Mac
 pip install -r requirements.txt
 python run.py
+
+## ▶️ Live Demo
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/JamesNebula/lidar-metadata-explorer?quickstart=1)
